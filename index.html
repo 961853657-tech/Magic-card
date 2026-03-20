@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MAGIC WORLD</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap" rel="stylesheet">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/examples/jsm/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs"
+            }
+        }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+            font-family: "Times New Roman", serif;
+            color: #ffb6c1;
+            width: 100vw;
+            height: 100vh;
+        }
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: opacity 0.5s;
+        }
+        h1 {
+            font-family: "Cinzel", serif;
+            font-size: 56px;
+            margin-top: 40px;
+            background: linear-gradient(to bottom, #fff, #ffb6c1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 20px rgba(255, 182, 193, 0.5);
+            text-align: center;
+        }
+        .controls {
+            position: absolute;
+            bottom: 80px;
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        button {
+            padding: 12px 24px;
+            border: 1px solid #ffb6c1;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            color: #ffb6c1;
+            cursor: pointer;
+            font-family: "Cinzel", serif;
+            letter-spacing: 2px;
+            transition: 0.3s;
+            text-transform: uppercase;
+        }
+        button:hover {
+            background: rgba(255, 182, 193, 0.2);
+        }
+        .instructions {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: 0.6;
+        }
+        #video-container {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            opacity: 0.5;
+            pointer-events: none;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 182, 193, 0.3);
+            z-index: 10;
+        }
+        video {
+            width: 160px;
+            height: 120px;
+            transform: scaleX(-1);
+            object-fit: cover;
+        }
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            transition: opacity 0.8s ease;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 2px solid rgba(255, 182, 193, 0.2);
+            border-top: 1px solid #ffb6c1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .loading-text {
+            letter-spacing: 4px;
+            font-size: 12px;
+            color: #ffb6c1;
+        }
+        #error-screen {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 0, 0, 0.6);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 100;
+            font-family: sans-serif;
+            font-size: 14px;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,255,255,0.2);
+            display: none;
+        }
+        #error-screen button {
+            margin-left: 15px;
+            padding: 4px 12px;
+            background: white;
+            color: black;
+            border: none;
+            border-radius: 4px;
+            font-family: sans-serif;
+            letter-spacing: normal;
+            text-transform: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div id="loading-screen">
+        <div class="spinner"></div>
+        <div class="loading-text">LOADING HOLIDAY MAGIC</div>
+    </div>
+
+    <div id="error-screen">
+        <span id="error-message"></span>
+        <button onclick="window.location.reload()">Retry</button>
+    </div>
+
+    <div id="ui-layer">
+        <h1>MAGIC WORLD</h1>
+        <div class="controls">
+            <button onclick="document.getElementById('file-input').click()">Add Memories</button>
+            <input type="file" id="file-input" hidden accept="image/*">
+            <div class="instructions">Press 'H' to Hide Controls • Open hand to scatter • Pinch to gather</div>
+        </div>
+    </div>
+
+    <div id="video-container">
+        <video id="webcam" autoPlay playsInline muted></video>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+        import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+        import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+
+        // State variables
+        let uiHidden = false;
+        let currentCardIndex = 0;
+        let targetRotation = 0;
+        let currentRotation = 0;
+        let targetScatter = 0;
+        let currentScatter = 0;
+        let handLandmarker = null;
+        let lastVideoTime = -1;
+        let lastHandX = 0.5;
+        let isHandPresent = false;
+        let cards = [];
+        let cardOriginals = [];
+
+        // DOM Elements
+        const container = document.getElementById('canvas-container');
+        const video = document.getElementById('webcam');
+        const loadingScreen = document.getElementById('loading-screen');
+        const errorScreen = document.getElementById('error-screen');
+        const errorMessage = document.getElementById('error-message');
+        const uiLayer = document.getElementById('ui-layer');
+        const fileInput = document.getElementById('file-input');
+
+        function showError(msg) {
+            errorMessage.textContent = '⚠️ ' + msg;
+            errorScreen.style.display = 'block';
+        }
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.setCrossOrigin('anonymous');
+        textureLoader.load('https://images.unsplash.com/photo-1514539079130-25950c84af65?q=80&w=1920&auto=format&fit=crop', (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            const imageAspect = texture.image.width / texture.image.height;
+            const screenAspect = window.innerWidth / window.innerHeight;
+            if (screenAspect > imageAspect) {
+                texture.repeat.set(1, imageAspect / screenAspect);
+                texture.offset.set(0, (1 - texture.repeat.y) / 2);
+            } else {
+                texture.repeat.set(screenAspect / imageAspect, 1);
+                texture.offset.set((1 - texture.repeat.x) / 2, 0);
+            }
+            scene.background = texture;
+        });
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 50);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setClearColor(0x000000, 0);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        renderer.toneMappingExposure = 2.2;
+        container.appendChild(renderer.domElement);
+
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+        const mainGroup = new THREE.Group();
+        scene.add(mainGroup);
+
+        // Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const pLight = new THREE.PointLight(0xffaa00, 2, 50);
+        pLight.position.set(0, 5, 0);
+        scene.add(pLight);
+
+        const spot1 = new THREE.SpotLight(0xffb6c1, 1200);
+        spot1.position.set(30, 40, 40);
+        scene.add(spot1);
+
+        const spot2 = new THREE.SpotLight(0x0044ff, 600);
+        spot2.position.set(-30, 20, -30);
+        scene.add(spot2);
+
+        // Post Processing
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.7);
+        composer.addPass(bloomPass);
+
+        // Snow Texture
+        const canvas = document.createElement('canvas');
+        canvas.width = 64; canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.translate(32, 32);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < 6; i++) {
+            ctx.rotate(Math.PI / 3);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(0, -24);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, -12);
+            ctx.lineTo(6, -18);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, -12);
+            ctx.lineTo(-6, -18);
+            ctx.stroke();
+        }
+        const particleTexture = new THREE.CanvasTexture(canvas);
+
+        // Magic Cards
+        const height = 30;
+        const radius = 12;
+        const count = 12;
+        
+        const cardCanvas = document.createElement('canvas');
+        cardCanvas.width = 256; cardCanvas.height = 512;
+        const cardCtx = cardCanvas.getContext('2d');
+        
+        cardCtx.fillStyle = '#1a0510';
+        cardCtx.fillRect(0, 0, 256, 512);
+        cardCtx.strokeStyle = '#ffb6c1';
+        cardCtx.fillStyle = '#ffb6c1';
+        cardCtx.lineWidth = 4;
+        cardCtx.strokeRect(12, 12, 232, 488);
+        cardCtx.lineWidth = 1.5;
+        cardCtx.strokeRect(20, 20, 216, 472);
+        
+        const drawDiamond = (x, y, size, context) => {
+            context.beginPath();
+            context.moveTo(x, y - size);
+            context.lineTo(x + size, y);
+            context.lineTo(x, y + size);
+            context.lineTo(x - size, y);
+            context.closePath();
+            context.fill();
+        };
+        drawDiamond(20, 20, 8, cardCtx);
+        drawDiamond(236, 20, 8, cardCtx);
+        drawDiamond(20, 492, 8, cardCtx);
+        drawDiamond(236, 492, 8, cardCtx);
+
+        cardCtx.lineWidth = 2;
+        cardCtx.beginPath();
+        cardCtx.moveTo(20, 80);
+        cardCtx.quadraticCurveTo(128, 10, 236, 80);
+        cardCtx.stroke();
+        cardCtx.beginPath();
+        cardCtx.moveTo(20, 432);
+        cardCtx.quadraticCurveTo(128, 502, 236, 432);
+        cardCtx.stroke();
+        
+        cardCtx.translate(128, 256);
+        cardCtx.strokeStyle = '#ffb6c1';
+        cardCtx.lineWidth = 4;
+        cardCtx.beginPath();
+        cardCtx.arc(0, 0, 70, 0, Math.PI * 2);
+        cardCtx.stroke();
+        cardCtx.beginPath();
+        cardCtx.arc(0, 0, 60, 0, Math.PI * 2);
+        cardCtx.stroke();
+        cardCtx.lineWidth = 2;
+        cardCtx.beginPath();
+        for(let i = 0; i < 6; i++) {
+            cardCtx.moveTo(0, -70);
+            cardCtx.lineTo(0, 70);
+            cardCtx.rotate(Math.PI / 3);
+        }
+        cardCtx.stroke();
+        
+        const cardTexture = new THREE.CanvasTexture(cardCanvas);
+        const cardGeo = new THREE.PlaneGeometry(4, 8);
+        const cardMat = new THREE.MeshStandardMaterial({
+            map: cardTexture,
+            color: 0xffffff,
+            emissive: 0xffb6c1,
+            emissiveIntensity: 0.2,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.9,
+            metalness: 0.8,
+            roughness: 0.2
+        });
+
+        for(let i = 0; i < count; i++) {
+            const card = new THREE.Mesh(cardGeo, cardMat);
+            const t = i / (count - 1);
+            const y = t * height;
+            const r = radius * Math.pow(1 - y / height, 1.2) + 2; 
+            const theta = i * Math.PI * 1.5;
+            
+            const px = r * Math.cos(theta);
+            const py = y - height/2;
+            const pz = r * Math.sin(theta);
+
+            card.position.set(px, py, pz);
+            card.lookAt(px * 2, py, pz * 2);
+
+            mainGroup.add(card);
+            cards.push(card);
+
+            const offset = new THREE.Vector3(
+                (Math.random() - 0.5) * 80,
+                (Math.random() - 0.5) * 80 + 20,
+                (Math.random() - 0.5) * 80
+            );
+            const rotOffset = new THREE.Vector3(
+                (Math.random() - 0.5) * Math.PI * 4,
+                (Math.random() - 0.5) * Math.PI * 4,
+                (Math.random() - 0.5) * Math.PI * 4
+            );
+
+            cardOriginals.push({
+                pos: card.position.clone(),
+                rot: card.rotation.clone(),
+                offset: offset,
+                rotOffset: rotOffset
+            });
+        }
+        
+        // Star
+        const starGeo = new THREE.OctahedronGeometry(1.5);
+        const starMat = new THREE.MeshStandardMaterial({
+            color: 0xffeebb,
+            emissive: 0xffaa00,
+            emissiveIntensity: 2,
+            roughness: 0.2,
+            metalness: 1
+        });
+        const star = new THREE.Mesh(starGeo, starMat);
+        star.position.y = height / 2 + 1;
+        mainGroup.add(star);
+
+        // Snowflakes
+        const snowGeo = new THREE.BufferGeometry();
+        const snowPos = [];
+        for(let i = 0; i < 500; i++) {
+            snowPos.push(
+                (Math.random() - 0.5) * 60,
+                (Math.random() - 0.5) * 60,
+                (Math.random() - 0.5) * 60
+            );
+        }
+        snowGeo.setAttribute('position', new THREE.Float32BufferAttribute(snowPos, 3));
+        const snowMat = new THREE.PointsMaterial({
+            size: 1.0,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.6,
+            map: particleTexture,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        const snow = new THREE.Points(snowGeo, snowMat);
+        scene.add(snow);
+
+        // Animation Loop
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+
+            currentRotation += (targetRotation - currentRotation) * 0.05;
+            if (!isHandPresent) {
+                targetRotation += 0.002;
+            }
+
+            mainGroup.rotation.y = currentRotation;
+            star.rotation.y = time;
+            star.rotation.z = time * 0.5;
+
+            currentScatter += (targetScatter - currentScatter) * 0.05;
+            
+            cards.forEach((card, i) => {
+                const orig = cardOriginals[i];
+                
+                const targetX = orig.pos.x + orig.offset.x * currentScatter;
+                const targetY = orig.pos.y + orig.offset.y * currentScatter;
+                const targetZ = orig.pos.z + orig.offset.z * currentScatter;
+                
+                card.position.x += (targetX - card.position.x) * 0.1;
+                card.position.y += (targetY - card.position.y) * 0.1;
+                card.position.z += (targetZ - card.position.z) * 0.1;
+
+                const targetRotX = orig.rot.x + orig.rotOffset.x * currentScatter;
+                const targetRotY = orig.rot.y + orig.rotOffset.y * currentScatter;
+                const targetRotZ = orig.rot.z + orig.rotOffset.z * currentScatter;
+
+                card.rotation.x += (targetRotX - card.rotation.x) * 0.1;
+                card.rotation.y += (targetRotY - card.rotation.y) * 0.1;
+                card.rotation.z += (targetRotZ - card.rotation.z) * 0.1;
+
+                if (currentScatter < 0.01) {
+                    card.position.y += Math.sin(time * 2 + i) * 0.02;
+                }
+            });
+
+            const positions = snow.geometry.attributes.position.array;
+            for(let i = 1; i < positions.length; i += 3) {
+                positions[i] -= 0.05;
+                if (positions[i] < -30) {
+                    positions[i] = 30;
+                }
+            }
+            snow.geometry.attributes.position.needsUpdate = true;
+
+            composer.render();
+        }
+        animate();
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+            
+            if (scene.background && scene.background.isTexture) {
+                const texture = scene.background;
+                const imageAspect = texture.image.width / texture.image.height;
+                const screenAspect = window.innerWidth / window.innerHeight;
+                
+                if (screenAspect > imageAspect) {
+                    texture.repeat.set(1, imageAspect / screenAspect);
+                    texture.offset.set(0, (1 - texture.repeat.y) / 2);
+                } else {
+                    texture.repeat.set(screenAspect / imageAspect, 1);
+                    texture.offset.set((1 - texture.repeat.x) / 2, 0);
+                }
+            }
+        });
+
+        // Initialize MediaPipe
+        async function initMediaPipe() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+                );
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+                    video.srcObject = stream;
+                    video.play().catch(e => console.error("Video play error:", e));
+                    video.addEventListener("loadeddata", predictWebcam);
+                } else {
+                    showError("Camera API not supported in this browser (requires HTTPS).");
+                }
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.style.display = 'none', 800);
+            } catch (err) {
+                console.error("Error initializing MediaPipe:", err);
+                if (err.name === 'NotAllowedError') {
+                    showError("Camera access denied. Please allow camera permissions.");
+                } else if (err.message && (err.message.includes('fetch') || err.message.includes('network'))) {
+                    showError("Failed to download AI model. Please check your network (VPN might be required).");
+                } else {
+                    showError("Failed to initialize: " + (err.message || "Unknown error. If in WeChat/QQ, open in Safari/Chrome."));
+                }
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.style.display = 'none', 800);
+            }
+        }
+
+        function predictWebcam() {
+            if (!handLandmarker) return;
+            
+            let startTimeMs = performance.now();
+            if (video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                const results = handLandmarker.detectForVideo(video, startTimeMs);
+                
+                if (results.landmarks && results.landmarks.length > 0) {
+                    isHandPresent = true;
+                    const hand = results.landmarks[0];
+                    
+                    const x = hand[9].x; 
+                    const deltaX = lastHandX - x;
+                    lastHandX = x;
+                    
+                    if (Math.abs(deltaX) > 0.005) {
+                        targetRotation += deltaX * 3;
+                    }
+
+                    const thumb = hand[4];
+                    const index = hand[8];
+                    const pinchDist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+
+                    if (pinchDist > 0.12) {
+                        targetScatter = 1;
+                    } else if (pinchDist < 0.08) {
+                        targetScatter = 0;
+                    }
+                } else {
+                    isHandPresent = false;
+                    targetScatter = 0; 
+                }
+            }
+            requestAnimationFrame(predictWebcam);
+        }
+
+        initMediaPipe();
+
+        // Keyboard controls
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'h') {
+                uiHidden = !uiHidden;
+                uiLayer.style.opacity = uiHidden ? '0' : '1';
+            }
+        });
+
+        // File Upload
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file || cards.length === 0) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const cardIndex = currentCardIndex % cards.length;
+                    const card = cards[cardIndex];
+
+                    const combinedCanvas = document.createElement('canvas');
+                    combinedCanvas.width = 256; 
+                    combinedCanvas.height = 512;
+                    const ctx = combinedCanvas.getContext('2d');
+                    
+                    const imgAspect = img.width / img.height;
+                    const canvasAspect = 256 / 512;
+                    let drawWidth = 256;
+                    let drawHeight = 512;
+                    let offsetX = 0;
+                    let offsetY = 0;
+                    
+                    if (imgAspect > canvasAspect) {
+                        drawWidth = 512 * imgAspect;
+                        offsetX = (256 - drawWidth) / 2;
+                    } else {
+                        drawHeight = 256 / imgAspect;
+                        offsetY = (512 - drawHeight) / 2;
+                    }
+                    ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+                    
+                    ctx.strokeStyle = '#ffb6c1';
+                    ctx.fillStyle = '#ffb6c1';
+                    
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(12, 12, 232, 488);
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRect(20, 20, 216, 472);
+                    
+                    drawDiamond(20, 20, 8, ctx);
+                    drawDiamond(236, 20, 8, ctx);
+                    drawDiamond(20, 492, 8, ctx);
+                    drawDiamond(236, 492, 8, ctx);
+
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(20, 80);
+                    ctx.quadraticCurveTo(128, 10, 236, 80);
+                    ctx.stroke();
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(20, 432);
+                    ctx.quadraticCurveTo(128, 502, 236, 432);
+                    ctx.stroke();
+
+                    const finalTexture = new THREE.CanvasTexture(combinedCanvas);
+                    finalTexture.colorSpace = THREE.SRGBColorSpace;
+
+                    if (card.material instanceof THREE.MeshStandardMaterial) {
+                        card.material = card.material.clone();
+                        card.material.map = finalTexture;
+                        card.material.emissiveIntensity = 0.05;
+                        card.material.needsUpdate = true;
+                    }
+
+                    card.scale.set(1, 1, 1);
+                    currentCardIndex += 1;
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>
+
